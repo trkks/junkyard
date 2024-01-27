@@ -17,18 +17,21 @@ import re
 from typing import Dict, List, NamedTuple, Union
 import newspaper
 from playwright.sync_api import Browser, sync_playwright
+from playwright._impl._api_types import TimeoutError
 import requests
 
 from jinja2 import Template
 from EdgeGPT.EdgeGPT import Chatbot, ConversationStyle
 
-from sqlalchemy import Column, Integer, String, Text
+from sqlalchemy import Column, Integer, String, Text, Float
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.types import DateTime
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
 from sqlalchemy_utils import database_exists, create_database
+
+from pydantic import BaseModel
+
 from markdownify import markdownify as md
 
 from datetime import datetime
@@ -41,22 +44,25 @@ from pathlib import Path
 
 # Jinja template for the prompt
 instructions = r"""
-Generate a descriptive and unbiased news title from following news article context.
+Generate a descriptive and unbiased news title from the news article context.
 - Follow practices used in scientific writing.
 - Include most important and interesting information in it.
 - Title should not be clickbait.
-- Use a same language for title that the news article is written in.
-- If original title is good enough, use it as is.
-- Provide reasoning for the title in English, and issues with the original title.
+- If original title is good enough, close of it or you are not sure how to improve it based on context, use it as is.
+- Do NOT generate a new title for opinion pieces, reviews, or other articles that are not meant to be objective.
+- Provide reasoning for the new title, and issues with the original title.
 - Keep the title concise and under 255 characters.
-- Article URL: {{original_url}}
+- Use a same language for a title that the original news article is written in.
+- Make estimation how clickbaity the old title is on a scale from 0.0 to 1.0.
+- Article URL: {{original_url|escape}}
 - Original title: {{_title|striptags|escape}}
 
 Format response in json following this structure:
 ```json
 {
-    'title': {title}
-    'reasoning': [{reasoning}, {reasoning}, ...]
+    'title': {title},
+    'reasoning': [{reasoning}, {reasoning}, ...],
+    'clickbaitiness score': {clickbaitiness}
 }
 ```
 """
@@ -84,6 +90,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+
 class Href(NamedTuple):
     url: str
     title: str
@@ -107,6 +114,7 @@ class HrefModel(BaseModel):
     context: str = Column(Text)  # Content of the article
 
     _reasoning: str = Column(Text, name="reasoning")  # Reasoning for the title as a list
+    sensationalism: float = Column(Float)  # Sensationalism score of the original title
 
     created = Column(DateTime, default=datetime.utcnow)  # Date and time when the article was created
     modified = Column(DateTime, onupdate=datetime.utcnow)  # Date and time when the article was last modified
@@ -137,13 +145,13 @@ def get_db_session():
     if session is None:
         fallback_path = Path(appdata_dir, "hrefs.db")
         db_url = os.environ.get("DATABASE_URL", f"sqlite+pysqlite:///{fallback_path}")
-        engine = create_engine(db_url)
+        engine = create_engine(db_url, connect_args={"check_same_thread": False})
 
         if not database_exists(engine.url):
-            logger.debug("Creating new database session with url %r", db_url)
+            logger.debug("Creating new database with url %r", db_url)
             create_database(engine.url)
         else:
-            logger.debug("Using existing database session with url %r", db_url)
+            logger.debug("Using existing database: %r", db_url)
 
         BaseModel.metadata.create_all(engine)
 
@@ -205,7 +213,7 @@ async def async_invoke_bot(prompt: str, webpage_context: str = None):
         simplify_response=True,
         locale="fi",
         webpage_context=webpage_context,
-        no_search=True,
+        no_search=False,
     )
     logger.debug(response)
     await bot.close()
@@ -229,9 +237,15 @@ def parse_bot_response(response) -> Dict[str, Union[str, list[str]]]:
     return data
 
 
-def fetch_news_article(url, browser: Browser):
+def fetch_news_content(url, browser: Browser):
     page = browser.new_page()
     page.goto(url)
+    # Ignore timout errors
+    try:
+        page.wait_for_load_state("networkidle")
+    except TimeoutError as e:
+        logger.debug("Timout error while loading page %r: %r", url, e)
+
     html_content = page.content()
 
     page.close()
@@ -246,10 +260,15 @@ def build(url):
 
     with sync_playwright() as playwright:
         # TODO: Change into edge
-        browser = playwright.firefox.launch(headless=True)
+        browser = playwright.firefox.launch(headless=False, firefox_user_prefs={
+            "intl.accept_languages": "fi",
+            "media.autoplay.default": 0,
+        })
         browser_context = browser.new_context()
 
-        article = fetch_news_article(url, browser=browser)
+        article = fetch_news_content(url, browser=browser)
+
+        logger.debug("Content length: %r", len(article.article_html))
 
         # console.log(browser_context.cookies())
 
@@ -257,7 +276,13 @@ def build(url):
         browser.close()
 
     prompt = generate_bot_prompt(article)
-    context = md(article.article_html)
+    context = md(article.article_html, heading_style="ATX")
+
+    print(context)
+
+    truncated_context = context[:150] + "..." + context[-100:] if len(context) > 253 else context
+    logger.debug("Extracted context: %r", truncated_context, extra={'markup': True, 'context': context})
+
     bot_response = query_bot_suggestion(prompt, context)
     bot_suggestion = parse_bot_response(bot_response)
 
@@ -269,6 +294,7 @@ def build(url):
         original_title=article.title,
         context=context,
         reasoning=bot_suggestion['reasoning'],
+        sensationalism=bot_suggestion['clickbaitiness score'],
 
         published=article.publish_date
     )
@@ -304,7 +330,8 @@ def test():
         'href': data.original_url,
         'Original title': data.original_title,
         'New title': data.title,
-        'reasoning': data.reasoning
+        'sensationalism': data.sensationalism,
+        'reasoning': data.reasoning,
     })
 
 
@@ -325,5 +352,6 @@ if __name__ == "__main__":
             'href': data.original_url,
             'Original title': data.original_title,
             'New title': data.title,
-            'reasoning': data.reasoning
+            'sensationalism': data.sensationalism,
+            'reasoning': data.reasoning,
         })
