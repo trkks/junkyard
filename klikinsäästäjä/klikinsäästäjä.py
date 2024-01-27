@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-# To install dependencies:
-#   $ pip install edgegpt-fork newspaper4k playwrigth markdownify sqlalchemy sqlalchemy-utils
-#   $ playwright install firefox
+"""
+Klikinsäästäjä-ng
+To install dependencies:
+    $ pip install edgegpt-fork newspaper4k playwrigth markdownify sqlalchemy sqlalchemy-utils
+    $ playwright install firefox
+
+usage: klikinsäästäjä.py [-h] <url|test>
+"""
 
 import asyncio
 from dataclasses import dataclass
@@ -284,6 +289,7 @@ def get_href_by_url(url):
 
     return article
 
+
 def test():
     logger.info("Fetching latest news from Iltalehti")
     uutiset = fetch_latest_iltalehti()
@@ -307,8 +313,17 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Generate a title for a news article")
-    parser.add_argument("url", help="URL of the news article")
+    parser.add_argument("url", help="URL of the news article. Use 'test' to fetch a random article from Iltalehti.")
     args = parser.parse_args()
 
     if args.url == "test":
         test()
+    else:
+        data = get_href_by_url(args.url)
+        print({
+            'url': data.url,
+            'href': data.original_url,
+            'Original title': data.original_title,
+            'New title': data.title,
+            'reasoning': data.reasoning
+        })
