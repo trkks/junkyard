@@ -47,9 +47,10 @@ Generate a descriptive and unbiased news title from the news article context.
 - Follow practices used in scientific writing.
 - Include most important and interesting information in it.
 - Title should not be clickbait.
+- If article is based on content of intrest groups or people who has vested interest ot topic title must indicate that.
 - If original title is good enough, close of it or you are not sure how to improve it based on context, use it as is.
 - Do NOT generate a new title for opinion pieces, reviews, clearly marked sponsored content, or other articles that are not meant to be objective.
-- If context content is not news report, mention type of the content in the title.
+- If article is not news report, mention type of the content in the title.
 - Provide reasoning for the new title, and issues with the original title.
 - Keep the title concise and under 255 characters.
 - Use a same language for a title that the original news article is written in.
