@@ -9,7 +9,7 @@ usage: klikinsäästäjä.py [-h] <url|test>
 """
 
 import asyncio
-from dataclasses import dataclass
+from enum import Enum
 import json
 import os
 import random
@@ -88,13 +88,63 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+edgetgpt_bot = contextvars.ContextVar(f"{__name__}_edgetgpt_bot")
+db_session = contextvars.ContextVar(f"{__name__}_db_session")
+
+BaseModel = declarative_base()
+
+# Monekypatch get_location_hint_from_locale to support Finnish
+from EdgeGPT.utilities import get_location_hint_from_locale as _get_location_hint_from_locale  # noqa: E402
+import EdgeGPT.request  # noqa: E402
+
+
+# Add support for Finnish. Enums cannot be modified, so we need to create a new one.
+class PatchedLocationHint(Enum):
+    FI = {
+        "locale": "fi-FI",
+        "LocationHint": [
+            {
+                "country": "Finland",
+                "state": "",
+                "city": "Helsinki",
+                "timezoneoffset": 2,
+                "countryConfidence": 8,
+                "Center": {
+                    "Latitude": 60.1699,
+                    "Longitude": 24.9384,
+                },
+                "RegionType": 2,
+                "SourceType": 1,
+            },
+        ],
+    }
+
+
+def _patched_get_location_hint_from_locale(locale: str):
+    """
+    Gets the location hint from the locale.
+
+    This is a patched version of the original function to ad support for Finnish.
+    """
+    _region, _locale = locale.split("-", 1)
+    locale = f"{_region.lower()}-{_locale.upper()}"
+
+    # Find the location hint from the locale
+    hint = next((hint for hint in PatchedLocationHint if hint.value["locale"] == locale), None)
+    if hint is None:
+        # Fallback to original function
+        return _get_location_hint_from_locale(locale)
+
+    return hint.value["LocationHint"]
+
+
+# Replace the original function with the patched one
+EdgeGPT.request.get_location_hint_from_locale = _patched_get_location_hint_from_locale
+
 
 class Href(NamedTuple):
     url: str
     title: str
-
-
-BaseModel = declarative_base()
 
 
 class HrefModel(BaseModel):
@@ -134,8 +184,6 @@ class HrefModel(BaseModel):
         """
         return f"<Article(url={self.url!r}, title={self.title!r}, reasoning={self.reasoning!r})>"
 
-
-db_session = contextvars.ContextVar(f"{__name__}_db_session")
 
 
 def get_db_session():
@@ -209,16 +257,19 @@ def generate_bot_prompt(article: newspaper.Article):
 
 
 async def async_invoke_bot(prompt: str, webpage_context: str = None):
+
     bot = await Chatbot.create()
     response = await bot.ask(
         prompt=prompt,
         conversation_style=ConversationStyle.precise,
         simplify_response=True,
-        locale="fi",
+        locale="fi-FI",
         webpage_context=webpage_context,
         no_search=False,
+        mode="gpt4-turbo",
     )
     logger.debug(response)
+    #print(response)
     await bot.close()
     return response['text']
 
@@ -240,7 +291,10 @@ def parse_bot_response(response) -> Dict[str, Union[str, list[str]]]:
     return data
 
 
-def fetch_news_content(url, browser: Browser):
+def fetch_page_html(url, browser: Browser):
+    """
+    Fetches the html of the news article page.
+    """
     page = browser.new_page()
     page.goto(url)
     # Ignore timout errors
@@ -263,13 +317,13 @@ def build(url):
 
     with sync_playwright() as playwright:
         # TODO: Change into edge
-        browser = playwright.firefox.launch(headless=False, firefox_user_prefs={
+        browser = playwright.firefox.launch(headless=True, firefox_user_prefs={
             "intl.accept_languages": "fi",
             "media.autoplay.default": 0,
         })
         browser_context = browser.new_context()
 
-        article = fetch_news_content(url, browser=browser)
+        article = fetch_page_html(url, browser=browser)
 
         logger.debug("Content length: %r", len(article.article_html))
 
