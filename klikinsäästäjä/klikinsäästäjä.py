@@ -9,6 +9,7 @@ usage: klikinsäästäjä.py [-h] <url|test>
 """
 
 import asyncio
+from collections import defaultdict
 from enum import Enum
 import json
 import os
@@ -48,10 +49,12 @@ Generate a descriptive and unbiased news title from the news article context.
 - Title should not be clickbait.
 - If original title is good enough, close of it or you are not sure how to improve it based on context, use it as is.
 - Do NOT generate a new title for opinion pieces, reviews, clearly marked sponsored content, or other articles that are not meant to be objective.
+- If context content is not news report, mention type of the content in the title.
 - Provide reasoning for the new title, and issues with the original title.
 - Keep the title concise and under 255 characters.
 - Use a same language for a title that the original news article is written in.
 - Make estimation how clickbaity the old title is on a scale from 0.0 to 1.0.
+- If article contains comments from users, ignore them.
 - Article URL: {{original_url|escape}}
 - Original title: {{_title|striptags|escape}}
 
@@ -295,13 +298,74 @@ def fetch_page_html(url, browser: Browser):
     """
     Fetches the html of the news article page.
     """
+
+    # Remove javascript warnings and errors produced by browser
+    def _filter(record):
+        if record.levelno >= logging.INFO:
+            if record.msg.startswith("[JavaScript Warning:") or record.msg.startswith("[JavaScript Error:"):
+                return False
+
+        return True
+
+    logging.getLogger("playwright.browser").addFilter(_filter)
+
+    def console_log(msg):
+        """
+        Log the playwright ConsoleMessage objects.
+        """
+
+        _logger = logging.getLogger("playwright.browser")
+
+        level_map = {
+            "log": logging.DEBUG,
+            "warning": logging.WARNING,
+            "error": logging.ERROR,
+            "info": logging.INFO,
+            "assert": logging.ERROR,
+            "debug": logging.DEBUG,
+        }
+        if msg.type not in level_map:
+            return
+
+        # Construct log record
+        record = logging.LogRecord(
+            name="playwright",
+            level=level_map[msg.type],
+            pathname=msg.location["url"],
+            lineno=msg.location["lineNumber"],
+            msg=msg.text,
+            args=(),
+            exc_info=None,
+        )
+
+        # Log the record
+        _logger.handle(record)
+
     page = browser.new_page()
+    page.on("console", console_log)
+
     page.goto(url)
     # Ignore timout errors
     try:
+        # Prevent media from autoplaying
+        page.add_script_tag(content=r"document.querySelector('video').pause();")
+        # Wait for the page to load
         page.wait_for_load_state("networkidle")
     except TimeoutError as e:
         logger.debug("Timout error while loading page %r: %r", url, e)
+
+    # Convert relative links to absolute links
+    page.add_script_tag(
+        content=r"""
+        console.log("Converting relative links to absolute links");
+        document.querySelectorAll('a').forEach((a) => {
+            if (a.getAttribute("href").startsWith('/')) {
+                console.log("Converting relative link to absolute link: " + a.href);
+                a.href = new URL(a.href, window.location.origin).href;
+            }
+        });
+        """
+    )
 
     html_content = page.content()
 
@@ -333,11 +397,12 @@ def build(url):
         browser.close()
 
     prompt = generate_bot_prompt(article)
-    context = md(article.article_html, heading_style="ATX")
+    context = md(article.article_html, heading_style="ATX").strip()
 
-    print(context)
+    from rich.markdown import Markdown
+    print(Markdown(context))
 
-    truncated_context = context[:150] + "..." + context[-100:] if len(context) > 253 else context
+    truncated_context = repr(context[:150]) + " ... " + repr(context[-100:]) if len(context) > 255 else context
     logger.debug("Extracted context: %r", truncated_context, extra={'markup': True, 'context': context})
 
     bot_response = query_bot_suggestion(prompt, context)
@@ -397,7 +462,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Generate a title for a news article")
-    parser.add_argument("url", help="URL of the news article. Use 'test' to fetch a random article from Iltalehti.")
+    parser.add_argument("url", help="URL of the news article. Use 'test' to fetch a random article from Iltalehti.", nargs="?", default="test")
     args = parser.parse_args()
 
     if args.url == "test":
