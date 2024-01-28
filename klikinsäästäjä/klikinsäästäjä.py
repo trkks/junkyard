@@ -17,8 +17,8 @@ import random
 import re
 from typing import Dict, List, NamedTuple, Union
 import newspaper
-from playwright.sync_api import Browser, sync_playwright
-from playwright._impl._api_types import TimeoutError
+from playwright.sync_api import Browser, sync_playwright, TimeoutError
+
 import requests
 
 from jinja2 import Template
@@ -130,6 +130,7 @@ def _patched_get_location_hint_from_locale(locale: str):
 
     This is a patched version of the original function to ad support for Finnish.
     """
+    # Fi-fi -> fi-FI
     _region, _locale = locale.split("-", 1)
     locale = f"{_region.lower()}-{_locale.upper()}"
 
@@ -308,14 +309,14 @@ def fetch_page_html(url, browser: Browser):
 
         return True
 
-    logging.getLogger("playwright.browser").addFilter(_filter)
+    # FIXME: Filter might be added multiple times
+    _logger = logging.getLogger("playwright.browser")
+    _logger.addFilter(_filter)
 
     def console_log(msg):
         """
         Log the playwright ConsoleMessage objects.
         """
-
-        _logger = logging.getLogger("playwright.browser")
 
         level_map = {
             "log": logging.DEBUG,
@@ -370,6 +371,13 @@ def fetch_page_html(url, browser: Browser):
 
     html_content = page.content()
 
+    # Validate content length
+    content_length = len(html_content)
+    logger.debug("Content length: %r", content_length)
+    if content_length < 100:
+        logger.debug("Page content: %r", html_content)
+        raise Exception("Content length is too short")
+
     page.close()
 
     article = newspaper.article(url)
@@ -390,9 +398,13 @@ def build(url):
 
         article = fetch_page_html(url, browser=browser)
 
-        logger.debug("Content length: %r", len(article.article_html))
+        content_length = len(article.article_html)
+        logger.debug("Content length: %r", content_length)
+        if content_length < 100:
+            raise Exception("Content length is too short")
 
-        # console.log(browser_context.cookies())
+        cookies = browser_context.cookies()
+        logger.debug("Browser cookies: %r", cookies, extra={'cookies': cookies})
 
         browser_context.close()
         browser.close()
@@ -400,8 +412,7 @@ def build(url):
     prompt = generate_bot_prompt(article)
     context = md(article.article_html, heading_style="ATX").strip()
 
-    from rich.markdown import Markdown
-    print(Markdown(context))
+    print(context)
 
     truncated_context = repr(context[:150]) + " ... " + repr(context[-100:]) if len(context) > 255 else context
     logger.debug("Extracted context: %r", truncated_context, extra={'markup': True, 'context': context})
