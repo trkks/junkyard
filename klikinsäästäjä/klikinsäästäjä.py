@@ -74,6 +74,9 @@ load_dotenv()
 appdata_dir = Path(user_data_dir('klikinsäästäjä-ng'))
 appdata_dir.mkdir(parents=True, exist_ok=True)
 
+# Default locale. Can be overridden with the LOCALE environment variable.
+LOCALE = os.environ.get("LOCALE") or "fi-FI"
+
 try:
     from rich.logging import RichHandler
     from rich.console import Console
@@ -90,7 +93,6 @@ except ImportError:
 # Create a logger
 logger = logging.getLogger(__name__)
 
-
 edgetgpt_bot = contextvars.ContextVar(f"{__name__}_edgetgpt_bot")
 db_session = contextvars.ContextVar(f"{__name__}_db_session")
 
@@ -99,7 +101,6 @@ BaseModel = declarative_base()
 # Monekypatch get_location_hint_from_locale to support Finnish
 from EdgeGPT.utilities import get_location_hint_from_locale as _get_location_hint_from_locale  # noqa: E402
 import EdgeGPT.request  # noqa: E402
-
 
 # Add support for Finnish. Enums cannot be modified, so we need to create a new one.
 class PatchedLocationHint(Enum):
@@ -123,13 +124,14 @@ class PatchedLocationHint(Enum):
     }
 
 
-def _patched_get_location_hint_from_locale(locale: str):
+def _patched_get_location_hint_from_locale(locale: str) -> List[Dict]:
     """
     Gets the location hint from the locale.
 
     This is a patched version of the original function to ad support for Finnish.
     """
     # Fi-fi -> fi-FI
+    locale = locale.replace("_", "-")
     _region, _locale = locale.split("-", 1)
     locale = f"{_region.lower()}-{_locale.upper()}"
 
@@ -261,14 +263,16 @@ def generate_bot_prompt(article: newspaper.Article):
 
 async def async_invoke_bot(prompt: str, webpage_context: str = None):
 
-    bot = await Chatbot.create()
+    cookies = json.load(open("cookies.json", "r"))
+    cookies = [{"name": k, "value": v} for k, v in cookies.items()]
+    bot = await Chatbot.create(cookies=cookies)
     response = await bot.ask(
         prompt=prompt,
         conversation_style=ConversationStyle.precise,
         simplify_response=True,
-        locale="fi-FI",
+        locale=LOCALE,
         webpage_context=webpage_context,
-        no_search=False,
+        # no_search=False,
         mode="gpt4-turbo",
     )
     logger.debug(response)
@@ -384,13 +388,22 @@ def fetch_page_html(url, browser: Browser):
 
 def build(url):
 
+    # Get locale
+    locale = LOCALE
+    locale_hint = random.choice(_patched_get_location_hint_from_locale(locale))
+
     with sync_playwright() as playwright:
-        # TODO: Change into edge
+        # TODO: Maybe change into edge for edgegpt
         browser = playwright.firefox.launch(headless=True, firefox_user_prefs={
-            "intl.accept_languages": "fi",
             "media.autoplay.default": 0,
         })
-        browser_context = browser.new_context()
+        browser_context = browser.new_context(
+            locale=locale.replace("_", "-"),
+            geolocation={
+                "longitude": locale_hint['Center']['Longitude'],
+                "latitude": locale_hint['Center']['Latitude'],
+            },
+        )
 
         article = fetch_page_html(url, browser=browser)
 
@@ -425,11 +438,8 @@ def build(url):
         context=context,
         reasoning=bot_suggestion['reasoning'],
         sensationalism=bot_suggestion['clickbaitiness score'],
-
         published=article.publish_date
     )
-    # x = HrefModel(url="url", title="title", original_url="original_url", original_title="original_title", context="context", reasoning=["reasoning"], published=datetime.utcnow())
-
     return article
 
 
@@ -463,6 +473,20 @@ def test():
         'sensationalism': data.sensationalism,
         'reasoning': data.reasoning,
     })
+
+
+def login_to_bing():
+    """
+    Login to bing and save cookies.
+    """
+    with sync_playwright() as playwright:
+        browser = playwright.firefox.launch(headless=False, firefox_user_prefs={
+            "intl.accept_languages": "fi",
+        })
+        browser_context = browser.new_context()
+
+        browser_context.close()
+        browser.close()
 
 
 if __name__ == "__main__":
