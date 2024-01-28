@@ -37,7 +37,7 @@ import logging
 import contextvars
 from dotenv import load_dotenv
 
-from platformdirs import site_data_dir
+from platformdirs import user_data_dir
 from pathlib import Path
 
 # Jinja template for the prompt
@@ -71,7 +71,7 @@ Format response in json following this structure:
 load_dotenv()
 
 # Get the path to the user's appdata directory
-appdata_dir = Path(site_data_dir('klikinsäästäjä-ng'))
+appdata_dir = Path(user_data_dir('klikinsäästäjä-ng'))
 appdata_dir.mkdir(parents=True, exist_ok=True)
 
 try:
