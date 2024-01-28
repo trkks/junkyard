@@ -9,7 +9,6 @@ usage: klikinsäästäjä.py [-h] <url|test>
 """
 
 import asyncio
-from collections import defaultdict
 from enum import Enum
 import json
 import os
@@ -49,7 +48,7 @@ Generate a descriptive and unbiased news title from the news article context.
 - Title should not be clickbait.
 - If article is based on content of intrest groups or people who has vested interest ot topic title must indicate that.
 - If original title is good enough, close of it or you are not sure how to improve it based on context, use it as is.
-- Do NOT generate a new title for opinion pieces, reviews, clearly marked sponsored content, or other articles that are not meant to be objective.
+- Do NOT generate a new title for comments, opinion pieces, reviews, clearly marked sponsored content, or other articles that are not meant to be objective.
 - If article is not news report, mention type of the content in the title.
 - Provide reasoning for the new title, and issues with the original title.
 - Keep the title concise and under 255 characters.
@@ -188,7 +187,6 @@ class HrefModel(BaseModel):
         Returns a string representation of the Article object.
         """
         return f"<Article(url={self.url!r}, title={self.title!r}, reasoning={self.reasoning!r})>"
-
 
 
 def get_db_session():
@@ -350,7 +348,7 @@ def fetch_page_html(url, browser: Browser):
     # Ignore timout errors
     try:
         # Prevent media from autoplaying
-        page.add_script_tag(content=r"document.querySelector('video').pause();")
+        page.add_script_tag(content=r"document.querySelectorAll('video').forEach((v) => { v.pause(); });")
         # Wait for the page to load
         page.wait_for_load_state("networkidle")
     except TimeoutError as e:
