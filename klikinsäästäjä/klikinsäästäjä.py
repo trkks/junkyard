@@ -357,10 +357,8 @@ def fetch_page_html(url, browser: Browser):
     # Convert relative links to absolute links
     page.add_script_tag(
         content=r"""
-        console.log("Converting relative links to absolute links");
         document.querySelectorAll('a').forEach((a) => {
             if (a.getAttribute("href").startsWith('/')) {
-                console.log("Converting relative link to absolute link: " + a.href);
                 a.href = new URL(a.href, window.location.origin).href;
             }
         });
