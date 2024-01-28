@@ -30,8 +30,6 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy_utils import database_exists, create_database
 
-from pydantic import BaseModel
-
 from markdownify import markdownify as md
 
 from datetime import datetime
@@ -49,7 +47,7 @@ Generate a descriptive and unbiased news title from the news article context.
 - Include most important and interesting information in it.
 - Title should not be clickbait.
 - If original title is good enough, close of it or you are not sure how to improve it based on context, use it as is.
-- Do NOT generate a new title for opinion pieces, reviews, or other articles that are not meant to be objective.
+- Do NOT generate a new title for opinion pieces, reviews, clearly marked sponsored content, or other articles that are not meant to be objective.
 - Provide reasoning for the new title, and issues with the original title.
 - Keep the title concise and under 255 characters.
 - Use a same language for a title that the original news article is written in.
@@ -169,13 +167,18 @@ def fetch_latest_iltalehti() -> List[Href]:
     response = requests.get(latest_url)
     data = response.json()
 
-    urls = []
+    article_links = []
 
     for article in data["response"]:
-        url = base_url.format(**article)
-        urls.append(Href(url, article['title']))
+        # Skip content that has sponsored content metadata
+        if article.get('metadata', {}).get('sponsored_content', False):
+            logger.debug("Skipping sponsored content: %r", article['title'])
+            continue
 
-    return urls
+        url = base_url.format(**article)
+        article_links.append(Href(url, article['title']))
+
+    return article_links
 
 
 def login_to_helsingin_sanomat(browser):
