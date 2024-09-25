@@ -1,0 +1,18 @@
+{
+  "manifest_version": 2,
+  "name": "Klikinsäästäjä",
+  "version": "1.0",
+
+  "description": "Replaces clickbait headlines on newssites with a truth",
+
+  "icons": {
+    "48": "kliki-48.png"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["*://*.iltalehti.fi/*"],
+      "js": ["klikinsaastaja.js"]
+    }
+  ]
+}
