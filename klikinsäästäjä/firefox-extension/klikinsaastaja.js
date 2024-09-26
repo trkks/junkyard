@@ -1,8 +1,8 @@
-let links = document.querySelectorAll("a");
-for (let link of links) {
-    // Links on page might have query-params appended.
-    if (link.href.startsWith("https://www.iltalehti.fi/treeni/a/a32d66ee-313d-42d7-b813-41400a84a4b6")) {
+const main = () => {
+    let links = document.querySelectorAll("a");
+    for (let link of links) {
         let titleElem = link.querySelector(".front-title");
+        if (!titleElem) { continue; }
         let originalTitle = titleElem.textContent;
         let originalOp = titleElem.style.opacity;
         var timer;
@@ -17,7 +17,7 @@ for (let link of links) {
                     console.log("FADED OUT!");
                     clearInterval(timer);
                     titleElem.style.opacity = 0;
-                    titleElem.textContent = "Selkämakkaroista pääsee eroon tekemällä selkälihasliikkeitä";
+                    titleElem.textContent = "FAKE NEWZ";
                     timer = setInterval(() => {
                         console.log("fading in..");
                         if (op >= 0.9) {
@@ -38,8 +38,10 @@ for (let link of links) {
         link.addEventListener("mouseleave", () => {
             console.log("leave");
             clearInterval(timer);
+            titleElem.style.opacity = 1;
             titleElem.textContent = originalTitle;
         });
-        break;
     }
-}
+};
+
+window.onload = () => setTimeout(main, 750);
