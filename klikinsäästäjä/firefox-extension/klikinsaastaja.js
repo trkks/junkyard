@@ -4,6 +4,8 @@ const main = () => {
         let titleElem = link.querySelector(".front-title");
         if (!titleElem) { continue; }
         let originalTitle = titleElem.textContent;
+        let truthTitle = "Totuudenmukaisempi otsikko";
+        titleElem.textContent = truthTitle;
         let originalOp = titleElem.style.opacity;
         var timer;
         link.addEventListener("mouseenter", () => {
@@ -17,7 +19,7 @@ const main = () => {
                     console.log("FADED OUT!");
                     clearInterval(timer);
                     titleElem.style.opacity = 0;
-                    titleElem.textContent = "FAKE NEWZ";
+                    titleElem.textContent = originalTitle;
                     timer = setInterval(() => {
                         console.log("fading in..");
                         if (op >= 0.9) {
@@ -39,9 +41,9 @@ const main = () => {
             console.log("leave");
             clearInterval(timer);
             titleElem.style.opacity = 1;
-            titleElem.textContent = originalTitle;
+            titleElem.textContent = truthTitle;
         });
     }
 };
 
-window.onload = () => setTimeout(main, 750);
+window.onload = main;
